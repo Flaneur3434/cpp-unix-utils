@@ -1,40 +1,78 @@
 #include <algorithm>
-#include <vector>
 #include <string>
+#include <variant>
+#include <vector>
+#include <unordered_map>
+#include <iostream>
+#include <charconv>
+#include <optional>
 
-class InputParser{
+class CmdLineParser{
 public:
-	InputParser (int &argc, char **argv){
-		for (int i=1; i < argc; ++i)
-			this->tokens.push_back(std::string(argv[i]));
+	using Arg = std::variant<std::string, int>;
+
+	explicit CmdLineParser (int& argc, char *argv[]){
+		CmdOptionsFromStdin(argc, argv);
 	}
 
-        const std::string& getCmdOption(const std::string &option) const{
-		std::vector<std::string>::const_iterator itr;
-		itr =  std::find(this->tokens.begin(), this->tokens.end(), option);
-		if (itr != this->tokens.end() && ++itr != this->tokens.end()){
-			return *itr;
-		}
-		static const std::string empty_string("");
-		return empty_string;
-        }
-        /// @author iain
-        bool cmdOptionExists(const std::string &option) const{
-		return std::find(this->tokens.begin(), this->tokens.end(), option)
-		    != this->tokens.end();
-        }
+	void CmdOptionsFromStdin(int& argc, char *argv[]);
+	Arg TryParseString(std::string_view& arg);
+	std::optional<Arg> getCmdOptions(std::string&& getStr);
+
+
 private:
-        std::vector <std::string> tokens;
+	std::unordered_map<std::string, Arg> mParsedArgs;
 };
 
-int main(int argc, char **argv){
-	InputParser input(argc, argv);
-	if(input.cmdOptionExists("-h")){
-		// Do stuff
+void CmdLineParser::CmdOptionsFromStdin(int& argc, char **argv) {
+    for (int i = 1; i < argc; i++) {
+        std::string_view cmd = std::string_view(argv[i]);
+		size_t pos = cmd.find('-');
+		
+		if (pos == std::string_view::npos) {
+			std::cout << "Wrong command line argument" << std::endl;
+		}
+
+		cmd = cmd.substr(pos + 1);
+		mParsedArgs[std::string(cmd.data(), cmd.size())] = TryParseString(cmd);
+    }
+}
+
+CmdLineParser::Arg CmdLineParser::TryParseString(std::string_view& arg) {
+	int result{};
+	const auto [ptr, ec] = std::from_chars(arg.data(), arg.data() + arg.size(), result);
+	if (ec == std::errc::invalid_argument || ec == std::errc::result_out_of_range) {
+		std::cerr << "Error parsing interger: " << arg << std::endl;
+		return std::string(arg.data(), arg.size());
 	}
-	const std::string &filename = input.getCmdOption("-f");
-	if (!filename.empty()){
-		// Do interesting things ...
+
+	return result;
+}
+
+std::optional<CmdLineParser::Arg> CmdLineParser::getCmdOptions(std::string&& getStr) {
+	auto cmd = mParsedArgs.find(getStr);
+	if (cmd == mParsedArgs.end()) {
+		return {};
 	}
-	return 0;
+
+	return cmd->first;
+}
+
+int main(int argc, char *argv[]){
+	auto clp = CmdLineParser(argc, argv);
+	auto get = clp.getCmdOptions(std::string("1"));
+	if (!get) {
+		std::cout << "did not find matching argument" << std::endl;
+		return -1;
+	}
+
+	std::visit([](auto&& arg) {
+		using T = std::decay_t<decltype(arg)>;
+		if constexpr (std::is_same_v<T, std::string>) {
+			std::cout << "Found argument: " << arg << std::endl;
+		}
+		else if constexpr (std::is_same_v<T, int>) {
+			std::cout << "Found argument: " << arg << std::endl;
+		}
+	}, *get);
 }
