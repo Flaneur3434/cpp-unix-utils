@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <ios>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -9,18 +10,21 @@
 #include <iostream>
 #include <charconv>
 #include <utility>
+#include <fstream>
+
+#include "extern.h"
 
 class CmdLineParser{
 public:
-	explicit CmdLineParser (int& argc, char *argv[]){
+	explicit CmdLineParser (int& argc, char *argv[]) noexcept {
 		CmdOptionsFromStdin(argc, argv);
 	}
 	~CmdLineParser();
 
 	using Arg = std::variant<std::string, int>;
-	void CmdOptionsFromStdin(int& argc, char *argv[]);
-	Arg TryParseString(std::string_view&& arg);
-	std::optional<Arg> getCmdOptions(const std::string& getStr);
+	void CmdOptionsFromStdin(int argc, char *argv[]) noexcept;
+	Arg TryParseString(const std::string& arg) const noexcept;
+	std::optional<Arg> getCmdOptions(const std::string& getStr) const noexcept;
 
 	std::unordered_map<std::string, Arg> mParsedArgs;
 };
@@ -29,22 +33,27 @@ CmdLineParser::~CmdLineParser() {
 	mParsedArgs.~unordered_map();
 }
 
-void CmdLineParser::CmdOptionsFromStdin(int& argc, char **argv) {
+void CmdLineParser::CmdOptionsFromStdin(int argc, char **argv) noexcept {
 	for (int i = 1; i < argc; i++) {
-		std::string_view cmd = std::string_view(argv[i]);
-		size_t pos = cmd.find('-');
+		const std::string cmd = std::string(argv[i]);
+		if (cmd == "-?") {
+			mParsedArgs["help"] = TryParseString(cmd);
+			return;
+		}
+
+		const size_t pos = cmd.find('-');
 		if (pos != std::string_view::npos) {
 			// arguments with `-` are flags
-			cmd = cmd.substr(pos + 1);
-			mParsedArgs[std::string(cmd.data(), cmd.size())] = TryParseString(std::string_view(argv[++i]));
+			const std::string flag = cmd.substr(pos + 1);
+			mParsedArgs[flag] = TryParseString(std::string(argv[++i]));
 		} else {
 			// else argument is assumed to be file name
-			mParsedArgs["filename"] = TryParseString(std::move(cmd));
+			mParsedArgs["filename"] = TryParseString(cmd);
 		}
 	}
 }
 
-CmdLineParser::Arg CmdLineParser::TryParseString(std::string_view&& arg) {
+CmdLineParser::Arg CmdLineParser::TryParseString(const std::string& arg) const noexcept {
 	int result{};
 	const auto [ptr, ec] = std::from_chars(arg.data(), arg.data() + arg.size(), result);
 	if (ec == std::errc::invalid_argument || ec == std::errc::result_out_of_range) {
@@ -54,8 +63,8 @@ CmdLineParser::Arg CmdLineParser::TryParseString(std::string_view&& arg) {
 	return result;
 }
 
-std::optional<CmdLineParser::Arg> CmdLineParser::getCmdOptions(const std::string& getStr) {
-	auto cmd = mParsedArgs.find(getStr);
+std::optional<CmdLineParser::Arg> CmdLineParser::getCmdOptions(const std::string& getStr) const noexcept {
+	const auto cmd = mParsedArgs.find(getStr);
 	if (cmd == mParsedArgs.end()) {
 		return {};
 	}
@@ -63,16 +72,36 @@ std::optional<CmdLineParser::Arg> CmdLineParser::getCmdOptions(const std::string
 	return cmd->second;
 }
 
-int main(int argc, char *argv[]){
-	auto clp = CmdLineParser(argc, argv);
-	auto fn = clp.getCmdOptions("filename");
-	if (!fn) {
+static void usage() noexcept {
+	std::cerr << "usage: cksum [-o 1 | 2 | 3] [file ...]" << std::endl;
+	std::cerr << "       sum [file ...]" << std::endl;
+	exit(1);
+}
+
+int main(int argc, char *argv[]) {
+	// https://www.cprogramming.com/tutorial/const_correctness.html
+	const auto clp = CmdLineParser(argc, argv);
+
+	const auto help_flag = clp.getCmdOptions("help");
+	if (help_flag) {
+		usage();
+	}
+
+	const auto file_mabye = clp.getCmdOptions("filename");
+	if (not file_mabye) {
 		std::cerr << "No file is given: aborting process!" << std::endl;
 		return -1;
 	}
 
-	auto algo_ver = clp.getCmdOptions("o");
-	if (!algo_ver) {
+	std::ifstream fd;
+	const auto filename = std::get<std::string>(*file_mabye);
+	fd.open(filename, std::ios_base::in);
+	if (not fd) {
+		std::cerr << "Could not open file: " << filename << std::endl;
+	}
+
+	const auto algo_ver = clp.getCmdOptions("o");
+	if (not algo_ver) {
 		// TODO: default algorithm is choosen
 		return 0;
 	}
