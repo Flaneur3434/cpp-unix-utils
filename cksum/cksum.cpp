@@ -19,21 +19,24 @@ public:
 	explicit CmdLineParser (int& argc, char *argv[]) noexcept {
 		CmdOptionsFromStdin(argc, argv);
 	}
+
 	~CmdLineParser();
 
+	void CmdOptionsFromStdin(int argc, char *argv[]) const noexcept;
+
 	using Arg = std::variant<std::string, int>;
-	void CmdOptionsFromStdin(int argc, char *argv[]) noexcept;
 	Arg TryParseString(const std::string& arg) const noexcept;
 	std::optional<Arg> getCmdOptions(const std::string& getStr) const noexcept;
 
-	std::unordered_map<std::string, Arg> mParsedArgs;
+private:
+	mutable std::unordered_map<std::string, Arg> mParsedArgs;
 };
 
 CmdLineParser::~CmdLineParser() {
 	mParsedArgs.~unordered_map();
 }
 
-void CmdLineParser::CmdOptionsFromStdin(int argc, char **argv) noexcept {
+void CmdLineParser::CmdOptionsFromStdin(int argc, char **argv) const noexcept {
 	for (int i = 1; i < argc; i++) {
 		const std::string cmd = std::string(argv[i]);
 		if (cmd == "-?") {
